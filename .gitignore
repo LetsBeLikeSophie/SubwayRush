@@ -1,0 +1,24 @@
+# Unity
+/Library/
+/Temp/
+/Obj/
+/Logs/
+/UserSettings/
+/Builds/
+/Build/
+/MemoryCaptures/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.pdb
+*.mdb
+*.apk
+*.aab
+*.keystore
+*.jks
+.vs/
+.vscode/
+.DS_Store
+Thumbs.db
