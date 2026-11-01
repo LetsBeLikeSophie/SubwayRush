@@ -12,10 +12,10 @@ public class Rig
     Art.Face face = Art.Face.Normal;
     readonly float wide;
 
-    public Rig(string look, Transform parent)
+    public Rig(string look, Transform parent, int outfit = 0, int tint = 0)
     {
         this.look = look;
-        wide = look == "spread" || look == "boss" ? 1.3f : 1f;
+        wide = (look == "spread" || look == "boss" ? 1.3f : 1f) * (outfit == Weather.Padding ? 1.15f : 1);
         go = new GameObject(look); root = go.transform; root.SetParent(parent);
         var sh = new GameObject("shadow"); shadow = sh.transform; shadow.SetParent(root, false); shadow.localPosition = new Vector3(0, .02f, 0); shadow.localScale = new Vector3(1.1f * wide, 1f, 1);
         var sr = sh.AddComponent<SpriteRenderer>(); sr.sprite = Art.Shadow(); sr.sortingOrder = -600;
@@ -24,12 +24,12 @@ public class Rig
         var back = Art.BackPart(look);
         SpriteRenderer backR = null;
         if (back != null) { backR = Part("back", back, body, new Vector3(look == "bundle" ? -.28f : -.26f, look == "bundle" ? .05f : .02f, 0)); }
-        var aB = Part("armB", Art.Arm(look, false), body, new Vector3(-.26f * wide, .68f, 0)); armB = aB.transform;
+        var aB = Part("armB", Art.Arm(look, false, outfit, tint), body, new Vector3(-.26f * wide, .68f, 0)); armB = aB.transform;
         var lB = Part("legB", Art.Leg(look), root, new Vector3(-.13f * wide, .74f, 0)); legB = lB.transform;
         var lF = Part("legF", Art.Leg(look), root, new Vector3(.13f * wide, .74f, 0)); legF = lF.transform;
-        var t = Part("torso", Art.Torso(look), body, Vector3.zero);
+        var t = Part("torso", Art.Torso(look, outfit, tint), body, Vector3.zero);
         headR = Part("head", Art.Head(look, face), body, new Vector3(.02f, .66f, 0)); head = headR.transform;
-        var aF = Part("armF", Art.Arm(look, true), body, new Vector3(.27f * wide, .68f, 0)); armF = aF.transform;
+        var aF = Part("armF", Art.Arm(look, true, outfit, tint), body, new Vector3(.27f * wide, .68f, 0)); armF = aF.transform;
         var front = Art.FrontPart(look);
         SpriteRenderer frontR = null;
         if (front != null) { frontR = Part("front", front, body, new Vector3(.12f, .36f, 0)); }

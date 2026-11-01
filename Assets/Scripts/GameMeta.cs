@@ -16,7 +16,7 @@ public partial class Game
     public int Level => botOn ? Mathf.Min(botRank, GameData.Stages.Count - 1) : selected;
     StageDef CurStage => GameData.Stages[Level];
     // 난이도: 단계가 오를수록, 헬게이트면 크게 뛴다
-    float Diff => Level + (CurStage.hell ? 5 : 0);
+    float Diff => Level + (CurStage.hell ? 4 : 0);
     public int Rank => Cleared / 2;
     public int Salary => PlayerPrefs.GetInt("salary", 0);
     string RankName => Ranks[Mathf.Min(Rank, Ranks.Length - 1)] + (Rank >= Ranks.Length ? " " + (Rank - Ranks.Length + 2) + "년차" : "");
@@ -24,9 +24,9 @@ public partial class Game
     string BossName => Bosses[Mathf.Min(Rank, Bosses.Length - 1)];
     int Lv(string id) { return botOn ? 0 : PlayerPrefs.GetInt("up_" + id, 0); }
 
-    float HardHp => .8f + Diff * .08f;
-    float HardHit => 1 + Diff * .05f;
-    float HardCrowd => 1 + Diff * .09f + (CurStage.hell ? .3f : 0);
+    float HardHp => .65f + Diff * .1f;
+    float HardHit => .8f + Diff * .06f;
+    float HardCrowd => .85f + Diff * .09f + (CurStage.hell ? .2f : 0);
 
     List<WeaponDef> OrderedWeapons()
     {
@@ -88,7 +88,7 @@ public partial class Game
     bool NearSeat(out float seatX)
     {
         seatX = 0; float best = 1.7f; bool found = false;
-        if (lobby) return false; // 회사 로비엔 분홍 자리가 없다
+        if (lobby || platform) return false; // 회사 로비와 승강장엔 분홍 자리가 없다
         int d = Mathf.RoundToInt(pPos.x / DoorGap);
         for (int i = d - 1; i <= d + 1; i++)
             foreach (float side in new[] { -.87f, .87f })
@@ -101,14 +101,14 @@ public partial class Game
 
     bool UseBadge()
     {
-        if (!NearSeat(out float x)) { Sfx.Play("ouch", .4f); Float(lobby ? "자리가 없다" : "분홍 자리!", pPos + new Vector2(0, 2.3f), new Color(1, .6f, .8f)); return false; }
+        if (!NearSeat(out float x)) { Sfx.Play("ouch", .4f); Float(lobby || platform ? "자리가 없다" : "분홍 자리!", pPos + new Vector2(0, 2.3f), new Color(1, .6f, .8f)); return false; }
         float nx = Mathf.Min(x + DoorGap, targetX + .87f);
         AddRing(pPos + new Vector2(0, 1), 1.4f, new Color(1, .55f, .75f));
         pPos = new Vector2(nx, FloorTop); pVel = Vector2.zero;
         AddRing(pPos + new Vector2(0, 1), 2.4f, new Color(1, .55f, .75f));
         foreach (var p in crowd)
-            if (!p.dying && (p.pos - pPos).magnitude < 2.6f) { p.stun = Mathf.Max(p.stun, p.isBoss ? 1 : 2.2f); p.vel += (p.pos - pPos).normalized * 3; }
-        Say(skill.line, 1.8f); Sfx.Play("skill", .55f);
+            if (!p.dying && (p.pos - pPos).magnitude < (Has("hook", "badge") ? 4f : 2.6f)) { p.stun = Mathf.Max(p.stun, p.isBoss ? 1 : Has("hook", "badge") ? 3.5f : 2.2f); p.vel += (p.pos - pPos).normalized * (Has("hook", "badge") ? 6 : 3); }
+        Say(skill.line, 1.8f); Sfx.Play("skill", .55f); ComboOnSkill(1);
         skillCd = SkillCdMax;
         return true;
     }

@@ -42,13 +42,13 @@ public partial class Game
     {
         // 노트북은 들어 올리는 동안 꼼짝 못 한다
         if (w.id == "laptop" && atkWind <= 0 && windW == null) {
-            windW = w; atkWind = .3f; atkCd = w.cooldown * mCooldown * (1 + WL(w) * UpOf(w.kind).cool);
+            windW = w; atkWind = .3f; atkCd = w.cooldown * mCooldown * (1 + WL(w) * UpOf(w.kind).cool) * (comboT > 0 && Has("laptop", "garlic") ? .6f : 1);
             Say("이거 비싼 건데...", .8f);
             foreach (var p in crowd) if (!p.dying && (p.pos - pPos).magnitude < 3.6f) p.stun = Mathf.Max(p.stun, .42f);
             return;
         }
         atkDur = DurOf(w.id); atkAnim = atkDur;
-        if (windW == null) atkCd = w.cooldown * mCooldown;
+        if (windW == null) atkCd = w.cooldown * mCooldown * (Has("suitcase", "seatcall") ? .85f : 1);
         int dir = facing;
         string kind = w.kind;
         if (kind == "back") { if (frontpack) kind = "front"; else dir = -facing; }
@@ -60,11 +60,11 @@ public partial class Game
         if (kind == "throw" || kind == "bomb") Sfx.Hit(w.hit, .5f); else Sfx.Hit("swish", .28f, .15f);
         switch (kind)
         {
-            case "sling": dmg += (beads + ul * 3) * 2.4f; break;
+            case "sling": dmg += Mathf.Min(14, beads + ul * 3) * 1.5f; break;
             case "extend": if (extT > 0) extend = Mathf.Min(extend + 1, 4); extT = 1.3f; range += extend * .6f; dmg *= 1 - extend * .14f; break;
             case "bomb":
             case "throw":
-                int shotCount = kind == "throw" ? 3 + ul : 1;
+                int shotCount = kind == "throw" ? 3 + ul + (comboT > 0 && Has("card", "phone") ? 2 : 0) : 1;
                 for (int n = 0; n < shotCount; n++)
                 {
                     var g = Spr("shot", Art.Icon(w.id), pPos + new Vector2(facing * .5f, 1.1f), 9000); g.transform.localScale = Vector3.one * .45f;
@@ -75,7 +75,7 @@ public partial class Game
                 dashT = .3f * (1 + ul * .15f); dashSpeed = 9; dashHit.Clear(); tripNext = Random.value < .12f + ul * .08f; Dust(); return;
             case "ram":
                 dashT = .4f; dashRam = true; dashSpeed = 8.5f; dashHit.Clear(); tripNext = false; ramStartX = pPos.x; Dust(); return;
-            case "stomp": if (++heelCount % 6 == 0) { mental -= 4; pFlash = .15f; Say("아 발 아파", .9f); } break;
+            case "stomp": if (++heelCount % 12 == 0) { mental -= 2; pFlash = .15f; Say("아 발 아파", .9f); } break;
             case "photo":
                 {
                     var center = pPos + new Vector2(dir * range, 0);
@@ -85,7 +85,7 @@ public partial class Game
                     {
                         if (p.dying || (p.pos - center).magnitude > w.depth) continue;
                         Damage(p, dmg, knock * dir, shot ? null : w.hit); shot = true;
-                        p.stun = Mathf.Max(p.stun, (p.isBoss ? .4f : 1.4f) + ul * .3f); if (!p.isBoss) p.posing = 1.4f;
+                        p.stun = Mathf.Max(p.stun, ((p.isBoss ? .4f : 1.4f) + ul * .3f) * (Has("selfie", "speaker") ? 1.25f : 1)); if (!p.isBoss) p.posing = 1.4f;
                         if (Random.value < .4f) Float("브이!", p.pos + new Vector2(0, 2.2f), Color.white);
                     }
                     if (shot) Sfx.Play(w.hit, .6f);
@@ -117,7 +117,7 @@ public partial class Game
             // 쇼핑백 걸기: 앞사람을 내 등 뒤로 넘긴다
             if (kind == "pull")
             {
-                if (p.isBoss) { Damage(p, dmg, 0, any ? null : w.hit); any = true; continue; }
+                if (p.isBoss) { Damage(p, dmg * 2, 0, any ? null : w.hit); any = true; continue; }
                 if (pulled >= 2) continue;
                 pulled++; p.pos.x = pPos.x - dir * Random.Range(.9f, 1.6f); p.vel.x = -dir * 2;
                 Damage(p, dmg, 0, any ? null : w.hit); any = true;
@@ -129,7 +129,7 @@ public partial class Game
             ApplyEffect(w, p, dir, ul);
             any = true;
         }
-        if (w.id == "beadbag" && firstHit != null) Beads(firstHit, dir, Mathf.Min(10, 5 + (beads + ul * 3) / 3), dmg * .22f);
+        if (w.id == "beadbag" && firstHit != null) Beads(firstHit, dir, Mathf.Min(10, 5 + (beads + ul * 3) / 3) * (comboT > 0 && Has("beadbag", "speaker") ? 2 : 1), dmg * .16f);
         if (any)
         {
             float heavy = StopOf(w.id);
@@ -140,7 +140,7 @@ public partial class Game
             // 칠 때 몸이 앞으로 살짝 쏠린다
             if (kind != "back" && kind != "spin" && kind != "wide") pVel.x += dir * (.5f + heavy * 10);
             // 백팩은 칠 때 반동으로 내가 밀려난다
-            if (kind == "back") pVel.x -= dir * 1.7f * (1 + ul * .3f);
+            if (kind == "back") pVel.x -= dir * 1.2f * (1 + ul * .3f);
         }
     }
 
@@ -164,10 +164,10 @@ public partial class Game
                 p.flail = 2f + ul * .3f;
                 if (Random.value < .3f) Speak(p, "따가워요!", .9f);
                 break;
-            case "heel": if (!p.isBoss) { p.bowl = .9f; p.bowlDir = dir; p.vel.y += Random.Range(-1f, 1f); Speak(p, "아아아악!", .8f); } break;
-            case "tumbler": if (Random.value < .5f) MakeSpill(p.pos, 3f, .45f); break;
+            case "heel": if (!p.isBoss) { p.bowl = .9f; p.bowlDir = dir; p.vel.y += Random.Range(-1f, 1f); Speak(p, "아아아악!", .8f); if (Has("heel", "perfume")) HeelScent(p); } break;
+            case "tumbler": if (Random.value < (comboT > 0 && Has("tumbler", "coffee") ? 1 : .5f)) MakeSpill(p.pos, 3f, .45f); break;
             case "lanyard": p.slow = 1.8f + ul * .5f; break;
-            case "keybag": if (Random.value < .3f) MakeLure(); break;
+            case "keybag": if (Random.value < (comboT > 0 && Has("keybag", "cry") ? .7f : .3f)) MakeLure(); break;
         }
     }
 
@@ -183,7 +183,7 @@ public partial class Game
 
     void MakeSpill(Vector2 pos, float life, float scale)
     {
-        if (spills.Count >= 6) return;
+        if (spills.Count >= 9) return;
         var g = Spr("spill", Art.Puddle(), pos, -650); g.transform.localScale = new Vector3(scale, scale * .85f, 1);
         spills.Add(new Spill { go = g, pos = pos, life = life, r = scale });
     }

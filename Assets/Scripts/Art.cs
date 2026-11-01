@@ -270,7 +270,52 @@ public static class Art
         return c.Spr(.5f, .12f);
     }
 
-    public static Sprite Torso(string id) { return Get("t_" + id, () => DrawTorso(id)); }
+    public static Sprite Torso(string id, int outfit = 0, int tint = 0) { return Get("t_" + id + outfit + (outfit >= Weather.Coat ? tint : 0), () => outfit >= Weather.Coat ? DrawOuter(id, outfit, tint) : DrawTorso(id)); }
+
+    static readonly int[] PaddingCol = { 0x1F2230, 0x34456E, 0xD9CFB8, 0x6E7480, 0x7E2F3C, 0x3D5A47 };
+    static readonly int[] CoatCol = { 0x2A2A33, 0x6B5540, 0x4B5060, 0x9B8568, 0x3A3448, 0x5A3A34 };
+    static Color OuterCol(int outfit, int tint) { return Hex(outfit == Weather.Padding ? PaddingCol[tint % 6] : CoatCol[tint % 6]); }
+
+    // 패딩과 코트는 원래 옷 위에 걸친다
+    static Sprite DrawOuter(string id, int outfit, int tint)
+    {
+        var l = LookOf(id); var c = new Cv(170, 120);
+        Color col = OuterCol(outfit, tint), dark = Dark2(col);
+        float m = 85, y = 8, bh = 100;
+        if (outfit == Weather.Padding)
+        {
+            float bw = Mathf.Min(150, 88 * l.width), x = m - bw / 2;
+            c.RO(x, y - 2, bw, bh + 2, 28, col);
+            for (int i = 1; i < 5; i++) { float yy = y + i * 20; c.R(x + 2, yy, bw - 4, 3, 1, dark); c.R(x + 8, yy + 5, bw - 16, 3, 1, new Color(1, 1, 1, .12f)); }
+            c.R(m - 2, y, 4, bh - 4, 1, dark);
+            c.RO(m - 26, y + bh - 12, 52, 16, 8, col);
+        }
+        else
+        {
+            float bw = 78 * l.width, x = m - bw / 2;
+            c.RO(x, y - 2, bw, bh + 2, 20, col);
+            c.Poly(Hex(0xEDEDED), m - 12, y + bh, m + 12, y + bh, m, y + bh - 30);
+            c.Poly(dark, m - 22, y + bh, m - 10, y + bh, m, y + bh - 36, m - 6, y + bh - 44);
+            c.Poly(dark, m + 22, y + bh, m + 10, y + bh, m, y + bh - 36, m + 6, y + bh - 44);
+            c.R(m - 1.5f, y, 3, bh - 40, 1, dark);
+            c.E(m + 9, y + 44, 3, 3, Line); c.E(m + 9, y + 24, 3, 3, Line);
+        }
+        return c.Spr(.5f, 8f / 120);
+    }
+
+    // 창밖의 비와 눈
+    public static Sprite Precip(bool snow) { return Get("precip" + snow, () =>
+    {
+        var c = new Cv(512, 256);
+        var r = new System.Random(7);
+        for (int i = 0; i < (snow ? 90 : 120); i++)
+        {
+            float x = r.Next(6, 506), y = r.Next(6, 240);
+            if (snow) { float s = 2 + (float)r.NextDouble() * 2.5f; c.E(x, y, s, s, new Color(1, 1, 1, .85f)); }
+            else c.Cap(x, y, x + 2, y + 14, 1, new Color(.8f, .9f, 1, .55f));
+        }
+        return c.Spr(.5f, .5f);
+    }); }
 
     static Sprite DrawTorso(string id)
     {
@@ -321,10 +366,18 @@ public static class Art
     }
 
     // 팔: 어깨가 위쪽 기준점
-    public static Sprite Arm(string id, bool front) { return Get("a_" + id + front, () =>
+    public static Sprite Arm(string id, bool front, int outfit = 0, int tint = 0) { return Get("a_" + id + front + outfit + (outfit >= Weather.Coat ? tint : 0), () =>
     {
         var l = LookOf(id); var c = new Cv(84, 110);
-        c.CapO(42, 92, 42, 34, 13, l.top); c.CapO(42, 26, 42, 20, 10.5f, l.skin);
+        if (outfit == Weather.Short) { c.CapO(42, 62, 42, 20, 10.5f, l.skin); c.CapO(42, 92, 42, 68, 13, l.top); }
+        else if (outfit == Weather.Coat) { c.CapO(42, 26, 42, 20, 10.5f, l.skin); c.CapO(42, 92, 42, 32, 13, OuterCol(outfit, tint)); }
+        else if (outfit == Weather.Padding)
+        {
+            Color col = OuterCol(outfit, tint);
+            c.CapO(42, 26, 42, 20, 10.5f, l.skin); c.CapO(42, 90, 42, 36, 17, col);
+            for (int i = 0; i < 3; i++) c.R(26, 44 + i * 15, 32, 3, 1, Dark2(col));
+        }
+        else { c.CapO(42, 92, 42, 34, 13, l.top); c.CapO(42, 26, 42, 20, 10.5f, l.skin); }
         if (front)
             switch (id)
             {
@@ -599,6 +652,85 @@ public static class Art
         return c.Spr(.5f, 0);
     }); }
 
+    // 승강장 쪽 모습: 스크린도어 벽. 유리 너머로 열차가 보인다
+    public static Sprite PlatformWall(Color line) { return Get("pw" + line, () =>
+    {
+        var c = new Cv(512, WallH);
+        c.RV(0, 384, 512, 90, 0, Hex(0x4A4D55), Hex(0x2E3036));
+        for (int i = 0; i < 2; i++) { float lx = 40 + i * 256; c.R(lx - 6, 432, 188, 24, 6, new Color(1, .98f, .85f, .3f)); c.R(lx, 438, 176, 12, 4, Hex(0xFFFEF0)); }
+        c.R(0, 372, 512, 14, 0, line);
+        c.RV(0, 340, 512, 34, 0, Hex(0xC9CBCE), Hex(0xA7A9AD));
+        c.R(198, 345, 116, 25, 4, Hex(0x141417));
+        foreach (float x0 in new float[] { 0, 336 })
+        {
+            c.RV(x0, 0, 176, 340, 0, Hex(0xA7A9AD), Hex(0x85878B));
+            c.Cut(x0 + 12, 20, 152, 312, 5);
+            c.R(x0 + 12, 20, 152, 312, 5, new Color(.72f, .86f, .92f, .14f));
+            c.Poly(new Color(1, 1, 1, .13f), x0 + 30, 20, x0 + 70, 20, x0 + 130, 332, x0 + 90, 332);
+        }
+        c.R(176, 0, 8, 340, 0, Hex(0x77787C)); c.R(328, 0, 8, 340, 0, Hex(0x77787C));
+        return c.Spr(.5f, 0);
+    }); }
+
+    public static Sprite PlatformFloor() { return Get("pf", () =>
+    {
+        var c = new Cv(512, FloorH);
+        c.RV(0, 0, 512, FloorH, 0, Hex(0x8F8E89), Hex(0xB4B2AA));
+        for (int x = 0; x < 512; x += 128) c.R(x, 0, 2, FloorH, 0, new Color(0, 0, 0, .1f));
+        for (int y = 0; y < FloorH; y += 70) c.R(0, y, 512, 2, 0, new Color(0, 0, 0, .1f));
+        // 벽 앞 노란 점자 블록
+        c.R(0, FloorH - 62, 512, 34, 0, Hex(0xE9BE3C));
+        for (int x = 6; x < 512; x += 16) for (int k = 0; k < 2; k++) c.E(x, FloorH - 54 + k * 16, 3.5f, 3.5f, Hex(0xC79F27));
+        c.R(0, FloorH - 12, 512, 12, 0, new Color(0, 0, 0, .35f));
+        c.R(176, FloorH - 14, 160, 14, 0, Hex(0x56575B));
+        // 문 앞 줄 서는 화살표
+        foreach (float ax in new float[] { 196, 316 })
+            for (int k = 0; k < 2; k++)
+            {
+                float ay = FloorH - 96 - k * 42;
+                c.Poly(Hex(0xE9BE3C, .85f), ax - 16, ay - 14, ax, ay, ax + 16, ay - 14, ax + 16, ay - 26, ax, ay - 12, ax - 16, ay - 26);
+            }
+        return c.Spr(.5f, 1);
+    }); }
+
+    // 열차 옆면. 창과 문마다 사람이 꽉 끼어 있다
+    public static Sprite TrainSide(Color line) { return Get("ts" + line, () =>
+    {
+        var c = new Cv(512, WallH);
+        c.RV(0, 0, 512, 420, 0, Hex(0xD9DBDE), Hex(0xA9ABB0));
+        c.R(0, 400, 512, 20, 0, Hex(0x77787C));
+        c.R(0, 118, 512, 16, 0, line); c.R(0, 344, 512, 8, 0, line);
+        var rnd = new System.Random(11);
+        foreach (float x0 in new float[] { 14, 362 })
+        {
+            c.R(x0 - 5, 145, 146, 190, 14, Hex(0x45464C));
+            c.R(x0, 150, 136, 180, 10, Hex(0x2B2D36));
+            Packed(c, x0 + 4, 154, 128, 172, rnd);
+            c.R(x0, 150, 136, 180, 10, new Color(.75f, .88f, .95f, .1f));
+        }
+        c.R(174, 0, 164, 350, 6, Hex(0x56575B));
+        c.R(182, 0, 148, 342, 4, Hex(0x2B2D36));
+        Packed(c, 186, 0, 140, 336, rnd);
+        return c.Spr(.5f, 0);
+    }); }
+
+    // 빽빽하게 눌린 얼굴들
+    static void Packed(Cv c, float x, float y, float w, float h, System.Random rnd)
+    {
+        int[] skin = { 0xF3C9A5, 0xEDBB92, 0xF7D5B8, 0xE5AE85 }, top = { 0x3A3F55, 0x5A3E3A, 0x2F4A44, 0x69707A, 0x7A3E4C };
+        for (float cy = y + h - 26; cy > y - 10; cy -= 44)
+            for (float cx = x + 22 + (float)rnd.NextDouble() * 12; cx < x + w - 10; cx += 42)
+            {
+                float rx = 22 + (float)rnd.NextDouble() * 5, ry = 19 + (float)rnd.NextDouble() * 3, by = cy - ry - 24;
+                c.R(cx - rx, Mathf.Max(y, by), rx * 2, Mathf.Max(1, cy - Mathf.Max(y, by)), 8, Hex(top[rnd.Next(top.Length)]));
+                if (cy - ry < y) continue;
+                c.E(cx, cy, rx, ry, Hex(skin[rnd.Next(skin.Length)]));
+                c.Cap(cx - rx + 2, cy + ry * .55f, cx + rx - 2, cy + ry * .55f, ry * .5f, Hex(0x2A2528));
+                c.E(cx - 8, cy + 1, 2.4f, 2.4f, Line); c.E(cx + 8, cy + 1, 2.4f, 2.4f, Line);
+                c.Cap(cx - 5, cy - 9, cx + 5, cy - 10, 1.3f, Line);
+            }
+    }
+
     public const int FloorH = 294;
     public static Sprite Floor() { return Get("floor", () =>
     {
@@ -756,6 +888,15 @@ public static class Art
     {
         var c = new Cv(48, 48);
         c.Poly(Color.white, 24, 46, 29, 29, 46, 24, 29, 19, 24, 2, 19, 19, 2, 24, 19, 29);
+        return c.Spr(.5f, .5f);
+    }); }
+
+    public static Sprite Water() { return Get("water", () =>
+    {
+        var c = new Cv(420, 110);
+        Color w = new Color(.62f, .78f, .95f, .6f);
+        c.E(210, 55, 200, 45, w); c.E(90, 45, 70, 34, w); c.E(320, 66, 80, 30, w);
+        c.E(180, 66, 100, 14, new Color(1, 1, 1, .4f));
         return c.Spr(.5f, .5f);
     }); }
 

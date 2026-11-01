@@ -71,6 +71,7 @@ public partial class Game
     void Title()
     {
         Box(new Rect(0, 0, gw, gh), new Color(.05f, .06f, .1f, .35f));
+        TO(new Rect(gw - 190, 18, 170, 40), Weather.Label, 26, Color.white, Ink, 2);
         Card(new Rect(gw / 2 - 250, 90, 500, 390), new Color(.09f, .28f, .17f, .96f));
         T(new Rect(0, 110, gw, 140), "지옥철", 104, Color.white, TextAnchor.MiddleCenter, FontStyle.Bold);
         float cx = gw / 2;
@@ -253,6 +254,7 @@ public partial class Game
             float pop = 1 + Mathf.Clamp01((f.ttl - .6f) * 8) * .5f;
             TO(new Rect(g.x - 80, g.y - 20, 160, 40), f.text, (int)((f.big ? 30 : 19) * pop), c, new Color(.32f, .08f, .02f, c.a), 2.2f);
         }
+        if (pFlash > 0) Box(new Rect(0, 0, gw, gh), new Color(.9f, .05f, .05f, pFlash * .55f));
         if (mental < maxMental * .3f && Mathf.Sin(Time.time * 7) > 0) Box(new Rect(0, 0, gw, gh), new Color(.8f, 0, 0, .1f));
 
         var me = W2G(pPos + new Vector2(0, -.08f));
@@ -283,7 +285,7 @@ if (arrived && phase != Phase.Exit)
             Box(new Rect(sg.x - 24, sg.y - 24, 48, 48), new Color(1, .45f, .7f, .9f));
             Cap(new Rect(sg.x - 14, sg.y - 14, 28, 28), "K");
         }
-if (stageT < 3.5f && !practice)
+if (stageT < (platform ? 1.4f : 3.5f) && !practice)
         {
             string bt = lobby ? BossName + " 등장" : (stageIndex + 1) + " / 3 구간";
             string bs = lobby ? "" : "문 " + doorCount + "칸  ·  정차 " + (stopsLeft + stopNo) + "번  ·  승객 체력 " + Mathf.RoundToInt((1 + stageIndex * .12f) * HardHp * 100) + "%" + (route.density > 1 ? "  ·  지옥철" : route.density < 1 ? "  ·  급행" : "");
@@ -295,6 +297,9 @@ if (stageT < 3.5f && !practice)
         int sec = (int)clockSec;
         Box(new Rect(gw - 170, 18, 150, 44), Ink);
         T(new Rect(gw - 170, 18, 150, 44), $"{sec / 3600:00}:{sec / 60 % 60:00}:{sec % 60:00}", 26, lobby ? new Color(1, .4f, .35f) : new Color(.45f, 1f, .5f), TextAnchor.MiddleCenter, FontStyle.Bold);
+
+        Box(new Rect(gw - 170, 62, 150, 30), new Color(.05f, .05f, .08f, .8f));
+        T(new Rect(gw - 170, 62, 150, 30), Weather.Label, 20, Color.white, TextAnchor.MiddleCenter, FontStyle.Bold);
 
         if (practice) PracticePanel(); else if (lobby) LobbyBar(); else RouteBar();
 
@@ -314,11 +319,13 @@ if (stageT < 3.5f && !practice)
         float sf = skill == null ? 0 : 1 - Mathf.Clamp01(skillCd / (SkillCdMax));
         Gauge(new Rect(152, y + 32, 300, 22), "방해", sf, sf >= 1 ? "준비" : Mathf.CeilToInt(Mathf.Max(0, skillCd)) + "초", new Color(.15f, .45f, 1f), new Color(.5f, .8f, 1f));
         // 출근 진행
-        float prog = lobby ? (bossDown ? 1 : 1 - lobbyT / 75f) : Mathf.Clamp01(pPos.x / targetX);
+        float prog = platform ? 0 : lobby ? (bossDown ? 1 : 1 - lobbyT / 75f) : Mathf.Clamp01(pPos.x / targetX);
         Box(new Rect(0, gh - 8, gw, 8), new Color(.05f, .05f, .12f));
         Box(new Rect(0, gh - 8, gw * prog, 8), new Color(1, .84f, .25f));
 
         float sz = 50, x = gw - 12 - sz, sy = y + 6;
+        var active = ActiveCombo;
+        if (active != null && active == comboSeen) TO(new Rect(gw - 232, sy - 34, 220, 24), active.name, 17, new Color(1, .85f, .3f), Ink, 1.3f);
         if (skill != null)
         {
             Slot(x, sy, sz, skill.id, "K", new Color(.7f, .86f, 1f));
@@ -383,6 +390,7 @@ if (stageT < 3.5f && !practice)
         bool transfer = phase == Phase.Ride ? stopsLeft <= 1 : finalStop;
         string tail = transfer ? " · 환승 " + DoorLabel(doorCount) : "";
         if (deaf) led = "♪ ♪ ♪";
+        else if (platform) led = phase == Phase.Open || phase == Phase.Exit ? "문이 열렸습니다" : line.stations[line.stations.Length - 1] + "행 열차 들어옵니다";
         else if (phase == Phase.Open && openT < 1.6f) led = "문이 열립니다";
         else if (phase == Phase.Brake || phase == Phase.Open || phase == Phase.Exit) led = "이번 역은 " + stationName + tail;
         else if (announced) led = "이번 역은 " + nextName + tail;

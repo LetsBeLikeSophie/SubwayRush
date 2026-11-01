@@ -6,10 +6,18 @@ using UnityEngine;
 // 시험용 자동 플레이어. 실행 인자로만 켜진다: -bot / -balance N / -shots 폴더
 public partial class Game
 {
-    bool botOn, godMode, greedy, botPractice; int botPI; float botPT; string botWeapon; Keys botKeys; int balanceRuns, wonRuns; string shotDir; float chooseDelay, botT;
+    bool botOn, godMode, greedy, botPractice, botCombo, botNoCombo; int botPI; float botPT; string botWeapon; Keys botKeys; int balanceRuns, wonRuns; string shotDir; float chooseDelay, botT;
     readonly HashSet<string> shotDone = new HashSet<string>();
     readonly List<string> results = new List<string>();
     float runStart; bool endWait; float endT;
+    float runClock, paceNext = 15, botTemp = 20; int botCode = 2;
+
+    // 0~3 = 구간 3개, 3~4 = 보스
+    float BotProgress()
+    {
+        if (lobby) return 3 + (boss == null || bossDown ? 1 : 1 - Mathf.Clamp01(boss.hp / boss.maxHp));
+        return stageIndex + (platform ? 0 : Mathf.Clamp01(pPos.x / targetX));
+    }
 
     void InitBot()
     {
@@ -19,14 +27,20 @@ public partial class Game
             if (a[i] == "-bot") botOn = true;
             if (a[i] == "-god") godMode = true;
             if (a[i] == "-greedy") greedy = true;
+            if (a[i] == "-combo") botCombo = true;
+            if (a[i] == "-nocombo") botNoCombo = true;
             if (a[i] == "-practice") botPractice = true;
             if (a[i] == "-weapon" && i + 1 < a.Length) botWeapon = a[i + 1];
             if (a[i] == "-rank" && i + 1 < a.Length) botRank = int.Parse(a[i + 1]);
             if (a[i] == "-balance" && i + 1 < a.Length) { botOn = true; balanceRuns = int.Parse(a[i + 1]); Time.captureDeltaTime = 1f / 30; Application.targetFrameRate = -1; }
             if (a[i] == "-shots" && i + 1 < a.Length) { botOn = true; shotDir = a[i + 1]; Directory.CreateDirectory(shotDir); }
+            if (a[i] == "-temp" && i + 1 < a.Length) botTemp = float.Parse(a[i + 1]);
+            if (a[i] == "-code" && i + 1 < a.Length) botCode = int.Parse(a[i + 1]);
             if (a[i] == "-seed" && i + 1 < a.Length) UnityEngine.Random.InitState(int.Parse(a[i + 1]));
         }
         if (!botOn) return;
+        Weather.Set(botTemp, botCode);
+        if (Array.IndexOf(a, "-liveweather") >= 0) StartCoroutine(Weather.Fetch());
         AudioListener.volume = 0;
         botT = shotDir != null ? 2.5f : .2f;
     }
@@ -38,7 +52,7 @@ public partial class Game
     }
 
     void BotOnChoices() { chooseDelay = shotDir != null ? 1.0f : .02f; }
-    void BotOnStage() { Debug.Log($"[BOT] stage {stageIndex} line={line.name} doors={doorCount} stops={stopsLeft} route={route.name} mental={mental:0}/{maxMental:0}"); }
+    void BotOnStage() { Debug.Log($"[BOT] stage {stageIndex} clock={runClock:0} line={line.name} doors={doorCount} stops={stopsLeft} route={route.name} mental={mental:0}/{maxMental:0}"); }
 
     void BotOnEnd(bool won)
     {
@@ -47,6 +61,8 @@ public partial class Game
         var names = string.Join("+", weapons.ConvertAll(w => w.id));
         Debug.Log($"[BOT] END {(won ? "WIN" : overReason)} stage={stageIndex} kills={kills} t={secs:0} weapons={names} skill={skill?.id} mental={mental:0}");
         results.Add((won ? "WIN" : overReason) + "@" + stageIndex);
+        Debug.Log($"[BOT] DONE w={botWeapon} result={(won ? "WIN" : overReason)} clock={runClock:0} prog={(won ? 4 : BotProgress()):0.00} mental={mental:0} weather={Weather.Label} combo={ActiveCombo?.name}");
+        runClock = 0; paceNext = 15;
         if (won) wonRuns++;
         endWait = true; endT = shotDir != null ? 1.5f : .05f;
     }
@@ -84,6 +100,13 @@ public partial class Game
                     // 시험용: 한 무기만 끝까지 든다
                     if (botWeapon != null)
                         for (int t = 0; t < 8 && choices[pick].replaces != null && GameData.Weapons.Exists(x => x.id == choices[pick].icon); t++) pick = UnityEngine.Random.Range(0, choices.Count);
+                    if (botNoCombo) for (int t = 0; t < 12 && choices[pick].combo; t++) pick = UnityEngine.Random.Range(0, choices.Count);
+                    // 시험용: 조합이 보이면 잡고, 잡은 조합은 안 버린다
+                    if (botCombo)
+                    {
+                        if (ActiveCombo != null) for (int t = 0; t < 8 && choices[pick].replaces != null; t++) pick = UnityEngine.Random.Range(0, choices.Count);
+                        else for (int i = 0; i < choices.Count; i++) if (choices[i].combo) pick = i;
+                    }
                     Choose(pick);
                 }
                 break;
@@ -113,6 +136,8 @@ public partial class Game
 
     void BotPlay()
     {
+        runClock += Time.deltaTime;
+        if (runClock >= paceNext) { Debug.Log($"[BOT] PACE w={botWeapon} t={paceNext:0} prog={BotProgress():0.00} mental={mental:0}"); paceNext += 15; }
         if (botPractice)
         {
             // 무기를 차례로 쓰면서 공격 중간 모습을 찍는다
@@ -130,7 +155,8 @@ public partial class Game
         }
         if (shotDir != null)
         {
-            if (stageT > 5) TakeShot("3_stage" + stageIndex);
+            if (stageT > 12) TakeShot("3_stage" + stageIndex);
+            if (comboT > 0 && comboT < 3.2f) TakeShot("c_combo");
             if (!lobby && phase == Phase.Open && !finalStop && phaseT < 3.5f) TakeShot("4_doors");
             if (!lobby && finalStop && phase == Phase.Open) TakeShot("5_final");
             if (ringing) TakeShot("6_call");
@@ -140,10 +166,25 @@ public partial class Game
         }
         var w = weapons[Mathf.Clamp(curWeapon, 0, weapons.Count - 1)];
         bool back = w.kind == "back" && !frontpack;
-        float goal = lobby && boss != null && !bossDown ? boss.pos.x : targetX;
+        if (platform)
+        {
+            if (phase == Phase.Brake && phaseT < 1.6f) TakeShot("p_train");
+            if (phase == Phase.Ride && phaseT < .8f) TakeShot("p_wait");
+            if (phase == Phase.Open && openT > .9f) TakeShot("p_open");
+            if (phase == Phase.Exit) TakeShot("p_board");
+            float dx = Mathf.Clamp(Mathf.Round(pPos.x / DoorGap), 0, platMax) * DoorGap;
+            if (phase != Phase.Open && pPos.x < 0) dx = 0;
+            botKeys.mx = pPos.x < dx - .25f ? 1 : (pPos.x > dx + .25f ? -1 : 0);
+            botKeys.my = 1; botKeys.atk = true;
+            if (back) { botKeys.atk = false; if (botKeys.mx == 0 || runClock % .5f < .1f) botKeys.mx = -1; else botKeys.mx = 1; }
+            else facing = botKeys.mx < 0 ? -1 : 1;
+            return;
+        }
+        float goal = lobby && boss != null && !bossDown ? boss.pos.x - (w.kind == "photo" ? 3.2f : 0) : targetX;
         botKeys.mx = pPos.x < goal - .4f ? 1 : (pPos.x > goal + .4f ? -1 : 0);
         botKeys.atk = true;
-        if (back) facing = -1; else facing = botKeys.mx < 0 ? -1 : 1;
+        if (back) { botKeys.atk = false; if (botKeys.mx != 0) botKeys.mx = runClock % .5f < .1f ? -botKeys.mx : botKeys.mx; else botKeys.mx = runClock % .5f < .25f ? -1 : 1; }
+        else facing = botKeys.mx < 0 ? -1 : 1;
         botKeys.my = Mathf.Sin(Time.time * .9f) * .6f;
         if (InExitWave())
         {

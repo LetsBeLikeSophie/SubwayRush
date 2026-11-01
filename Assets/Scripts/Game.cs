@@ -7,8 +7,8 @@ using Random = UnityEngine.Random;
 public class Passenger
 {
     public PassengerDef def; public Rig rig;
-    public Vector2 pos, vel; public float size = .9f, press, hp, maxHp, stun, angry, attackT, flash, anim, phase, dieT, hurtT, moving, hitLean, flail, flailT, slow, fall, posing, bowl; public int fallDir = 1, bowlDir = 1;
-    public bool dying, isBoss, chaser, exiting; public float Radius => def.radius;
+    public Vector2 pos, vel; public float size = .9f, press, hp, maxHp, stun, angry, attackT, flash, anim, phase, dieT, hurtT, moving, hitLean, flail, flailT, slow, fall, posing, bowl, shoveT, daze; public int fallDir = 1, bowlDir = 1;
+    public bool dying, isBoss, chaser, exiting; public int outfit; public float Radius => def.radius;
 }
 
 public class RouteDef
@@ -17,7 +17,7 @@ public class RouteDef
     public RouteDef(string name, string tag, float density, int stopDelta, int bonus) { this.name = name; this.tag = tag; this.density = density; this.stopDelta = stopDelta; this.bonus = bonus; }
 }
 
-public class Choice { public string icon, title, sub, replaces, gradeText; public ItemDef item; public Action act; public Color tint = Color.white; }
+public class Choice { public string icon, title, sub, replaces, gradeText; public bool combo; public ItemDef item; public Action act; public Color tint = Color.white; }
 
 public enum St { Title, Map, Choose, Stage, Over, Clear }
 enum Phase { Ride, Brake, Open, Leave, Exit }
@@ -57,6 +57,7 @@ public partial class Game : MonoBehaviour
     LineDef line; int startDoor, doorCount, stopsLeft, stopNo; bool lobby, bossDown; float targetX, gateX;
     Phase phase; float phaseT, trainSpeed = 1, doorOpen, bgBlend, stageT, lobbyT; int stationI; string stationName = "";
     bool finalStop; Passenger boss;
+    bool platform; Transform trainRoot; float boardX, rushT; int platMax;
     readonly List<Transform[]> doors = new List<Transform[]>();
     class Layer { public Transform[] t; public float tw, speed, off; }
     class Fore { public Transform t; public float x; }
@@ -102,6 +103,7 @@ public partial class Game : MonoBehaviour
         cam.orthographic = true; cam.orthographicSize = 3f; cam.clearFlags = CameraClearFlags.SolidColor; cam.backgroundColor = new Color(.08f, .08f, .1f);
         cam.transform.position = new Vector3(0, 0, -10);
         InitBot();
+        if (!botOn) StartCoroutine(Weather.Fetch());
         BuildTitleScene();
     }
 
@@ -124,15 +126,16 @@ public partial class Game : MonoBehaviour
 
     public void StartRun()
     {
+        if (!botOn) StartCoroutine(Weather.Fetch());
         wLv.Clear(); skLv = 0; weapons.Clear(); items.Clear(); skill = null; usedLines.Clear(); bubbles.Clear(); floaters.Clear();
-        expressCount = 0; practice = false; curWeapon = 0; stageIndex = 0; kills = 0; beads = 3; badgeUses = 0; pendingRewards = 0; maxMental = 100; mental = 100 + Lv("vit") * 5; maxMental = mental;
+        comboSeen = null; expressCount = 0; practice = false; curWeapon = 0; stageIndex = 0; kills = 0; beads = 3; badgeUses = 0; pendingRewards = 0; maxMental = 100; mental = 100 + Lv("vit") * 5; maxMental = mental;
         calls.Clear(); foreach (var who in Callers) calls.Add(new CallState { who = who, interval = BaseCall * 2.2f, timer = Random.Range(10f, 70f) });
         frontpack = deaf = false; route = new RouteDef("일반", "", 1, 0, 0); clockSec = 8 * 3600 + 20 * 60; callInterval = BaseCall;
         Recalc();
         var opts = botWeapon != null ? GameData.Weapons.FindAll(x => x.id == botWeapon) : Pick(WeaponPool(), 3);
         ShowChoices("오늘의 무기", "", opts.ConvertAll(w => WeaponChoice(w, () =>
         {
-            var s = Pick(SkillPool(), 3);
+            var s = FirstSkills(w);
             ShowChoices("오늘의 방해", "", s.ConvertAll(k => SkillChoice(k, () => BeginStage())));
         })));
     }
@@ -190,7 +193,8 @@ public partial class Game : MonoBehaviour
 
     Choice WeaponChoice(WeaponDef w, Action then)
     {
-        return new Choice { icon = w.id, title = w.name, sub = w.desc, replaces = weapons.Count >= 2 ? weapons[curWeapon].name + " 대신" : null, tint = new Color(1, .93f, .8f), act = () =>
+        var pc = PartnerOf(w.id);
+        return new Choice { icon = w.id, title = w.name, sub = w.desc, combo = pc != null && skill != null && pc.skill == skill.id, replaces = weapons.Count >= 2 ? weapons[curWeapon].name + " 대신" : null, tint = new Color(1, .93f, .8f), act = () =>
         {
             if (weapons.Count < 2) { weapons.Add(w); curWeapon = weapons.Count - 1; } else weapons[curWeapon] = w;
             then?.Invoke();
@@ -201,7 +205,8 @@ public partial class Game : MonoBehaviour
     {
         var side = k.desc.Contains("·") ? k.desc.Substring(k.desc.IndexOf('·') + 1).Trim() : "";
         var reach = k.radius >= 5 ? "넓게" : k.radius >= 3.8f ? "주변" : k.radius > 0 ? "가까이" : "앞바닥";
-        return new Choice { icon = k.id, title = k.name, sub = k.id == "badge" || k.id == "dash" ? k.desc : reach + " " + k.duration.ToString("0.#") + "초 멈춤" + (side.Length > 0 ? "\n" + side : ""), replaces = skill != null ? skill.name + " 대신" : null, tint = new Color(.82f, .93f, 1f), act = () => { skill = k; skLv = 0; then?.Invoke(); } };
+        ComboDef cb = null; foreach (var hw in weapons) if (cb == null) cb = ComboWith(hw.id, k.id);
+        return new Choice { icon = k.id, title = k.name, sub = k.id == "badge" || k.id == "dash" ? k.desc : reach + " " + k.duration.ToString("0.#") + "초 멈춤" + (side.Length > 0 ? "\n" + side : ""), combo = cb != null, replaces = skill != null ? skill.name + " 대신" : null, tint = new Color(.82f, .93f, 1f), act = () => { skill = k; skLv = 0; then?.Invoke(); } };
     }
 
     static readonly string[] GradeNames = { "평범", "좋음", "대박", "위험한 대박" };
@@ -344,7 +349,7 @@ public partial class Game : MonoBehaviour
     void ClearStage()
     {
         if (root != null) Destroy(root);
-        crowd.Clear(); doors.Clear(); stationTexts.Clear(); straps.Clear(); lights.Clear(); fxs.Clear(); shots.Clear(); spills.Clear(); bubbles.Clear(); floaters.Clear(); layers.Clear(); fore.Clear(); zones.Clear(); stationRoot = null; vignette = null; portal = null; pRig = null;
+        crowd.Clear(); doors.Clear(); stationTexts.Clear(); straps.Clear(); lights.Clear(); fxs.Clear(); shots.Clear(); spills.Clear(); bubbles.Clear(); floaters.Clear(); layers.Clear(); fore.Clear(); zones.Clear(); stationRoot = null; trainRoot = null; vignette = null; portal = null; pRig = null;
         arrow = null; boss = null;
     }
 
@@ -363,20 +368,19 @@ public partial class Game : MonoBehaviour
         targetX = doorCount * DoorGap; gateX = targetX;
         stopsLeft = route.Express ? Mathf.Max(2, (3 + stageIndex + 1) / 2) : 3 + stageIndex; stopNo = 0; passDone = false; passT = 0; if (route.Express && !practice) expressCount++; finalStop = false;
         stationI = Random.Range(0, Mathf.Max(1, line.stations.Length - stopsLeft));
-        lures.Clear(); tunnels.Clear(); BuildCar(stageIndex == 1);
+        lures.Clear(); tunnels.Clear();
+        platform = !lobby && !practice;
+        if (platform) BuildPlatform(); else BuildCar(stageIndex == 1);
 
-        // 플레이어
-        pRig = new Rig("player", rootT); pRig.root.localScale = Vector3.one * .9f;
-        wGo = Spr("weapon", Art.Icon("tumbler"), Vector2.zero, 0); wSr = wGo.GetComponent<SpriteRenderer>();
-        pPos = new Vector2(0, -1.75f); pVel = Vector2.zero; facing = 1; selfStun = dizzy = latched = noAttack = dashT = atkCd = atkAnim = 0; skillCd = 0;
+        MakePlayer(platform ? new Vector2(-1.9f, FloorBottom + .25f) : new Vector2(0, -1.75f));
+        facing = 1; selfStun = dizzy = latched = noAttack = dashT = atkCd = atkAnim = comboT = 0; skillCd = 0;
 
-        var a = Txt("▼", new Vector2(targetX, 2.1f), .6f, new Color(1, .75f, 0), 9000); arrow = a.transform;
-
-        if (lobby)
+        if (platform) StartPlatform();
+        else if (lobby)
         {
             lobbyT = 75; clockSec = 8 * 3600 + 58 * 60 + 45;
             Spr("gate", Art.Gate(), new Vector2(gateX, -1.95f), Order(-1.95f));
-            boss = SpawnP(GameData.Boss, new Vector2(targetX * .55f, -1.75f)); boss.isBoss = true; boss.size = 1.12f; boss.hp *= .65f + Diff * .12f; boss.maxHp = boss.hp; Speak(boss, "자네, 잠깐 얘기 좀 하지", 3f);
+            boss = SpawnP(GameData.Boss, new Vector2(targetX * .55f, -1.75f)); boss.isBoss = true; boss.size = 1.12f; boss.hp *= .45f + Diff * .15f; boss.maxHp = boss.hp; Speak(boss, "자네, 잠깐 얘기 좀 하지", 3f);
             for (int i = 0; i < 12; i++) SpawnP(GameData.Coworker, new Vector2(Random.Range(4f, targetX - 1), Random.Range(FloorBottom, FloorTop)));
         }
         else
@@ -387,8 +391,138 @@ public partial class Game : MonoBehaviour
             for (int i = 0; i < n; i++) SpawnP(RandomDef(), new Vector2(Random.Range(1.2f, 11f), Random.Range(FloorBottom, FloorTop)));
             for (int i = 0; i < n / 4; i++) SpawnP(RandomDef(), new Vector2(Random.Range(-5f, -1.2f), Random.Range(FloorBottom, FloorTop)));
         }
-        cam.transform.position = new Vector3(1, 0, -10);
+        cam.transform.position = new Vector3(pPos.x + 1, 0, -10);
         BotOnStage();
+    }
+
+    void MakePlayer(Vector2 pos)
+    {
+        pRig = new Rig("player", rootT); pRig.root.localScale = Vector3.one * .9f;
+        wGo = Spr("weapon", Art.Icon("tumbler"), Vector2.zero, 0); wSr = wGo.GetComponent<SpriteRenderer>();
+        pPos = pos; pVel = Vector2.zero;
+        var a = Txt("▼", new Vector2(targetX, 2.1f), .6f, new Color(1, .75f, 0), 9000); arrow = a.transform;
+    }
+
+    // ---------- 승강장: 열차가 들어오면 사람들을 뚫고 문으로 들어간다 ----------
+
+    void BuildPlatform()
+    {
+        const float wallY = -0.7f;
+        var bg = Spr("bg", Art.Pixel(), new Vector2(targetX / 2, 1), -1000); bg.transform.localScale = new Vector3(60 + targetX, 12, 1);
+        bg.GetComponent<SpriteRenderer>().color = new Color(.04f, .04f, .06f);
+        AddLayer(Art.Tunnel(), 4, 7, 0, 1.1f, 2.1f, -999, Color.white);
+        trainRoot = new GameObject("train").transform; trainRoot.SetParent(rootT);
+        for (int i = -4; i <= 9; i++) Spr("train", Art.TrainSide(line.color), new Vector2(i * DoorGap, wallY), -900, trainRoot);
+        var head = Spr("head", Art.Pixel(), new Vector2(-4 * DoorGap - 2.5f, .9f), -900, trainRoot); head.transform.localScale = new Vector3(1, 3.2f, 1); head.GetComponent<SpriteRenderer>().color = new Color(.13f, .15f, .2f);
+        var lamp = Spr("lamp", Art.Pixel(), new Vector2(-4 * DoorGap - 2.75f, .2f), -899, trainRoot); lamp.transform.localScale = new Vector3(.3f, .22f, 1); lamp.GetComponent<SpriteRenderer>().color = new Color(1, .93f, .55f);
+        trainRoot.gameObject.SetActive(false);
+        for (int i = -3; i <= doorCount + 3; i++)
+        {
+            float x = i * DoorGap;
+            Spr("wall", Art.PlatformWall(line.color), new Vector2(x, wallY), -800);
+            Spr("floor", Art.PlatformFloor(), new Vector2(x, wallY), -800);
+            var dl = Spr("dl", Art.DoorLeaf(), new Vector2(x - .28f, wallY), -860); var dr = Spr("dr", Art.DoorLeaf(), new Vector2(x + .28f, wallY), -860);
+            doors.Add(new[] { dl.transform, dr.transform });
+            Txt(DoorLabel(i), new Vector2(x, 2.13f), .17f, new Color(1, .35f, .25f), -790);
+            Txt(DoorLabel(i), new Vector2(x, -1.23f), .16f, new Color(.25f, .24f, .22f, .75f), -790);
+            Txt(line.stations[stationI % line.stations.Length], new Vector2(x + 2, 2.62f), .2f, Color.white, -790);
+        }
+        // 기둥: 이 너머로는 못 간다
+        platMax = Mathf.Min(2, doorCount - 3);
+        foreach (float px in new[] { -3f, platMax * DoorGap + 2.4f })
+        {
+            var pil = Spr("pillar", Art.Pixel(), new Vector2(px, 0), 8000); pil.transform.localScale = new Vector3(.8f, 6.2f, 1); pil.GetComponent<SpriteRenderer>().color = new Color(.3f, .32f, .36f);
+        }
+        var v = Spr("vig", Art.Vignette(), Vector2.zero, 9900); vignette = v.transform; vignette.localScale = new Vector3(1.5f, 1.5f, 1);
+    }
+
+    void StartPlatform()
+    {
+        phase = Phase.Ride; phaseT = 1.5f; trainSpeed = 0; doorOpen = 0; openT = 0; boarded = false; sweepWarn = 0;
+        stationName = line.stations[stationI % line.stations.Length];
+        int n = CrowdWant();
+        float x1 = platMax * DoorGap + 6;
+        for (int i = 0; i < n; i++)
+        {
+            // 절반은 문 앞에 줄을 서 있다
+            float x = i % 2 == 0 ? Random.Range(0, platMax + 1) * DoorGap + Random.Range(-1.2f, 1.2f) : Random.Range(-6f, x1);
+            SpawnP(RandomDef(), new Vector2(x, i % 2 == 0 ? Random.Range(FloorBottom + .5f, FloorTop) : Random.Range(FloorBottom, FloorTop)));
+        }
+        Sfx.Play("annc", .8f);
+    }
+
+    void TickPlatform(float dt)
+    {
+        phaseT -= dt; trainSpeed = 0;
+        doorOpen = Mathf.MoveTowards(doorOpen, phase == Phase.Open || phase == Phase.Exit ? 1 : 0, dt * 1.6f);
+        switch (phase)
+        {
+            case Phase.Ride:
+                if (phaseT <= 0) { phase = Phase.Brake; phaseT = 3f; }
+                break;
+            case Phase.Brake:
+                if (phaseT <= 0) { phase = Phase.Open; phaseT = 5.5f; openT = 0; boarded = false; rushT = 0; Sfx.Play("door"); }
+                break;
+            case Phase.Open:
+                openT += dt;
+                // 먼저 내리는 사람들이 쏟아져 나온다
+                if (!boarded && openT > .25f)
+                {
+                    boarded = true;
+                    for (int d = -1; d <= platMax + 1; d++)
+                        for (int i = 0; i < 3 && crowd.Count < MaxCrowd; i++)
+                        {
+                            var e = SpawnP(RandomDef(), new Vector2(d * DoorGap + Random.Range(-.5f, .5f), FloorTop + .1f));
+                            e.vel.y = -3.2f;
+                        }
+                }
+                // 줄 선 사람들은 문으로 몰린다
+                rushT -= dt;
+                if (rushT <= 0 && crowd.Count > 0)
+                {
+                    rushT = .16f;
+                    var r = crowd[Random.Range(0, crowd.Count)];
+                    if (!r.dying && Mathf.Abs(r.pos.x - pPos.x) < 9) r.exiting = true;
+                }
+                int dn = Mathf.RoundToInt(pPos.x / DoorGap);
+                if (openT > .6f && doorOpen > .4f && Mathf.Abs(pPos.x - dn * DoorGap) < .75f && pPos.y >= FloorTop - .12f)
+                {
+                    phase = Phase.Exit; phaseT = .8f; boardX = dn * DoorGap; Sfx.Play("pick"); Say("끼었다...", 1f);
+                }
+                else if (phaseT <= 0) { phase = Phase.Leave; phaseT = 1.1f; Sfx.Play("close"); Say("아 안 돼!", 1.2f); }
+                break;
+            case Phase.Leave:
+                if (phaseT <= 0)
+                {
+                    if (!godMode) mental -= 8 * mTaken;
+                    Float("-" + Mathf.RoundToInt(8 * mTaken), pPos + new Vector2(0, 2.2f), new Color(1, .35f, .3f));
+                    Say(Sighs[Random.Range(0, Sighs.Length)], 1.6f);
+                    phase = Phase.Ride; phaseT = 2f;
+                }
+                break;
+            case Phase.Exit:
+                if (phaseT <= 0) EnterTrain();
+                break;
+        }
+    }
+
+    // 탄 문 앞에서 바로 시작한다. 멀리 있는 문으로 탔을수록 환승 문이 가깝다
+    void EnterTrain()
+    {
+        float x = boardX;
+        ClearStage(); lures.Clear(); tunnels.Clear();
+        root = new GameObject("Stage"); rootT = root.transform;
+        platform = false; dashT = atkWind = 0;
+        BuildCar(stageIndex == 1);
+        if (Weather.Wet) for (int i = 0; i < 3; i++) { MakeSpill(new Vector2(Random.Range(2f, targetX - 2), Random.Range(FloorBottom, FloorTop)), 999, 1.2f); spills[spills.Count - 1].go.GetComponent<SpriteRenderer>().sprite = Art.Water(); }
+        MakePlayer(new Vector2(x, FloorTop - .05f));
+        phase = Phase.Leave; phaseT = 1.1f; trainSpeed = 0; doorOpen = 1; announced = false; passDone = false; sweepWarn = 0;
+        foreach (var t in stationTexts) t.GetComponent<TextMesh>().text = stationName;
+        int n = Mathf.RoundToInt(CrowdWant() * .8f);
+        for (int i = 0; i < n; i++) SpawnP(RandomDef(), new Vector2(x + Random.Range(1.2f, 11f), Random.Range(FloorBottom, FloorTop)));
+        for (int i = 0; i < n / 4; i++) SpawnP(RandomDef(), new Vector2(x + Random.Range(-5f, -1.2f), Random.Range(FloorBottom, FloorTop)));
+        cam.transform.position = new Vector3(x + 1.2f, 0, -10);
+        Sfx.Play("close");
     }
 
     void AddLayer(Sprite spr, float tw, int count, float speed, float y, float sy, int order, Color c)
@@ -418,6 +552,7 @@ public partial class Game : MonoBehaviour
                 AddLayer(Art.Skyline(1), 8, 3, 4f, 1f, 1f, -997, Color.white);
                 AddLayer(Art.Truss(), 2, 1, 22f, 1.1f, 1.5f, -996, Color.white);
                 layers[layers.Count - 1].tw = 9;
+                if (Weather.Wet) AddLayer(Art.Precip(Weather.snow), 4, 7, Weather.snow ? 5 : 30, 1.1f, 1, -995, Color.white);
             }
             else
             {
@@ -476,7 +611,7 @@ public partial class Game : MonoBehaviour
         var v = Spr("vig", Art.Vignette(), Vector2.zero, 9900); vignette = v.transform; vignette.localScale = new Vector3(1.5f, 1.5f, 1);
     }
 
-    int CrowdWant() { return lobby ? 16 : Mathf.Min(MaxCrowd, Mathf.RoundToInt((46 + stopNo * 3) * route.density * HardCrowd)); }
+    int CrowdWant() { return platform ? Mathf.Min(MaxCrowd, Mathf.RoundToInt(36 * route.density * HardCrowd)) : lobby ? 16 : Mathf.Min(MaxCrowd, Mathf.RoundToInt((46 + stopNo * 3) * route.density * HardCrowd)); }
 
     float pressT, pressLoad, pushLineT, openT, sweepWarn; bool arrived, boarded, announced; int stopType; string nextName = "";
     readonly List<SpriteRenderer> zones = new List<SpriteRenderer>();
@@ -510,7 +645,8 @@ public partial class Game : MonoBehaviour
     {
         var p = new Passenger { def = d, pos = pos, hp = d.hp * 1f * (1 + stageIndex * .12f) * HardHp, chaser = Random.value < .25f, phase = Random.value * 10, attackT = Random.value };
         p.maxHp = p.hp; if (d.small) p.size = .68f;
-        p.rig = new Rig(d.look, rootT); p.rig.root.localScale = Vector3.one * p.size;
+        if (d != GameData.Boss && d != GameData.Coworker) p.outfit = Weather.PickOutfit();
+        p.rig = new Rig(d.look, rootT, p.outfit, Random.Range(0, 6)); p.rig.root.localScale = Vector3.one * p.size;
         crowd.Add(p);
         return p;
     }
@@ -587,6 +723,7 @@ public partial class Game : MonoBehaviour
     void TickPhase(float dt)
     {
         if (practice) { trainSpeed = 1; announced = false; return; }
+        if (platform) { TickPlatform(dt); return; }
         if (lobby)
         {
             phase = Phase.Ride; lobbyT -= dt; clockSec = 8 * 3600 + 60 * 60 - lobbyT;
@@ -596,7 +733,7 @@ public partial class Game : MonoBehaviour
         }
         if (!arrived && phase != Phase.Exit && Mathf.Abs(pPos.x - targetX) < 1.5f)
         {
-            arrived = true; ringing = false; onCallT = 0; Say("휴... 겨우 도착했다", 3f); Sfx.Play("pick");
+            arrived = true; pVel = Vector2.zero; ringing = false; onCallT = 0; Say("휴... 겨우 도착했다", 3f); Sfx.Play("pick");
             if (!finalStop) stopsLeft = 1;
             if (phase == Phase.Ride) phaseT = Mathf.Min(phaseT, 1.2f);
             else if (phase == Phase.Open && !finalStop) phaseT = Mathf.Min(phaseT, .3f);
@@ -639,7 +776,7 @@ public partial class Game : MonoBehaviour
             case Phase.Open:
                 openT += dt;
                 if (!boarded && openT > (stopType == 1 ? .5f : ExitWave)) { boarded = true; if (!finalStop && !arrived) Board(); }
-                if (finalStop && Mathf.Abs(pPos.x - targetX) < 1.5f) { phase = Phase.Exit; phaseT = 1.1f; ringing = false; onCallT = 0; break; }
+                if (finalStop && (arrived || Mathf.Abs(pPos.x - targetX) < 1.5f)) { phase = Phase.Exit; phaseT = 1.1f; ringing = false; onCallT = 0; break; }
                 if (phaseT <= 0)
                 {
                     Sfx.Play("close");
@@ -659,7 +796,7 @@ public partial class Game : MonoBehaviour
     // 지하철이 서거나 출발할 때 다 같이 쏠린다
     void Lurch(float v)
     {
-        pVel.x += v;
+        if (!arrived) pVel.x += v;
         foreach (var p in crowd) p.vel.x += v / p.def.weight;
     }
 
@@ -695,6 +832,15 @@ public partial class Game : MonoBehaviour
     void DoorFlow(float dt)
     {
         sweepWarn = 0;
+        if (platform)
+        {
+            // 내리는 사람들에게 잠깐 밀려난다
+            if (dashT > 0 || phase != Phase.Open || openT > 1.3f || doorOpen < .4f) return;
+            var dp = new Vector2(Mathf.Round(pPos.x / DoorGap) * DoorGap, FloorTop) - pPos;
+            float dd = dp.magnitude;
+            if (dd > .01f && dd < 3f) pPos -= dp / dd * (1 - dd / 3) * 2.2f * dt;
+            return;
+        }
         if (lobby || arrived || practice || dashT > 0 || phase != Phase.Open || doorOpen < .4f) return;
         int d = Mathf.RoundToInt(pPos.x / DoorGap);
         var door = new Vector2(d * DoorGap, FloorTop);
@@ -713,7 +859,7 @@ public partial class Game : MonoBehaviour
 
     void TickCall(float dt)
     {
-        if (phase == Phase.Exit || arrived || practice) return;
+        if (phase == Phase.Exit || arrived || practice || platform) return;
         if (ringing)
         {
             ringT -= dt; ringBeep -= dt;
@@ -738,7 +884,7 @@ public partial class Game : MonoBehaviour
     public void AnswerCall()
     {
         if (!ringing) return;
-        ringing = false; onCallT = 2.8f + curCall.missed * .7f;
+        ringing = false; onCallT = 2f + curCall.missed * .5f;
         Say(curCall.missed >= 2 ? "죄송합니다... 네... 죄송합니다..." : caller[0] == "회사" ? "네! 네! 네에!" : "아 지금 지하철인데요...", 2.6f);
         curCall.missed = 0; curCall.interval = BaseCall * 2.2f; curCall.timer = curCall.interval;
     }
@@ -756,7 +902,7 @@ public partial class Game : MonoBehaviour
 
     void TickPlayer(float dt)
     {
-        atkCd -= dt; skillCd -= dt; hurtCd -= dt; pFlash -= dt; selfStun -= dt; dizzy -= dt; latched -= dt; noAttack -= dt; extT -= dt; atkAnim -= dt; playerLineT -= dt;
+        atkCd -= dt; skillCd -= dt; hurtCd -= dt; pFlash -= dt; selfStun -= dt; dizzy -= dt; comboT -= dt; latched -= dt; noAttack -= dt; extT -= dt; atkAnim -= dt; playerLineT -= dt;
         if (extT <= 0) extend = 0;
         sighT -= dt;
         if (sighT <= 0) { sighT = Random.Range(9f, 16f); if (playerLineT <= 0 && !ringing && onCallT <= 0) Say(Sighs[Random.Range(0, Sighs.Length)], 2f); }
@@ -768,7 +914,7 @@ public partial class Game : MonoBehaviour
         bool frozen = ringing || onCallT > 0 || selfStun > 0 || phase == Phase.Exit || arrived || atkWind > 0;
         if (phase == Phase.Exit)
         {
-            pPos = Vector2.MoveTowards(pPos, new Vector2(targetX, FloorTop + .35f), dt * 3f);
+            pPos = Vector2.MoveTowards(pPos, new Vector2(platform ? boardX : targetX, FloorTop + .35f), dt * 3f);
             pRig.SetColor(new Color(1, 1, 1, Mathf.Clamp01(phaseT)));
             wSr.color = Color.clear; pMoving = 1; pAnim += dt * 9;
             pVel = Vector2.zero;
@@ -817,11 +963,11 @@ public partial class Game : MonoBehaviour
         DoorFlow(dt);
         if (state != St.Stage) return;
 
-        if (k.atk && atkCd <= 0 && noAttack <= 0 && !ringing && atkWind <= 0 && dashT <= 0) { Attack(w); if (w.kind == "back" && !frontpack) atkCd = .8f * mCooldown; }
+        if (k.atk && atkCd <= 0 && noAttack <= 0 && !ringing && (onCallT <= 0 || Has("card", "phone")) && atkWind <= 0 && dashT <= 0) { Attack(w); if (w.kind == "back" && !frontpack) atkCd = .8f * mCooldown; }
         if (k.skillDown && skillCd <= 0 && skill != null && !ringing && onCallT <= 0) UseSkill();
 
-        float maxX = lobby ? (bossDown ? gateX + 1 : gateX - 1.3f) : targetX + 8;
-        pPos.x = Mathf.Clamp(pPos.x, -6, maxX);
+        float maxX = platform ? platMax * DoorGap + 1.9f : lobby ? (bossDown ? gateX + 1 : gateX - 1.3f) : targetX + 8;
+        pPos.x = Mathf.Clamp(pPos.x, platform ? -2.5f : -6, maxX);
         pPos.y = Mathf.Clamp(pPos.y, FloorBottom, FloorTop);
         pMoving = Mathf.MoveTowards(pMoving, mv.sqrMagnitude > .01f ? 1 : 0, dt * 8);
         pAnim += dt * (4 + mv.magnitude * 3.2f);
@@ -832,7 +978,10 @@ public partial class Game : MonoBehaviour
 
     void Damage(Passenger p, float dmg, float knock, string hitText)
     {
-        p.hp -= godMode ? dmg * 8 : dmg; foreach (var sp in spills) if (Mathf.Abs(p.pos.x - sp.pos.x) < sp.r * 1.6f && Mathf.Abs(p.pos.y - sp.pos.y) < .5f) { knock *= 2; break; }
+        dmg *= Weather.DamageMul(p.outfit) * (ActiveCombo != null ? ComboDmg : 1); knock *= Weather.KnockMul(p.outfit);
+        if (Random.value < .12f && (p.outfit == Weather.Padding || p.outfit == Weather.Short)) Float(p.outfit == Weather.Padding ? "푹신!" : "끈적!", p.pos + new Vector2(-.5f, 2.3f), p.outfit == Weather.Padding ? new Color(.7f, .9f, 1) : new Color(1, .8f, .5f));
+        foreach (var sp in spills) if (Mathf.Abs(p.pos.x - sp.pos.x) < sp.r * 1.6f && Mathf.Abs(p.pos.y - sp.pos.y) < .5f) { knock *= 2; if (Has("tumbler", "coffee")) dmg *= 1.5f; break; }
+        p.hp -= godMode ? dmg * 8 : dmg;
         if (p.def.heal && !p.dying) { mental = Mathf.Min(maxMental, mental + 2); Float("떡!", p.pos + new Vector2(.4f, 2f), new Color(1, .75f, .85f)); }
         if (p.def.smell) foreach (var o in crowd) if (o != p && !o.dying && (o.pos - p.pos).magnitude < 1.2f) o.stun = Mathf.Max(o.stun, .5f);
         p.vel.x += knock * 1.5f / p.def.weight; p.vel.y += Random.Range(-.6f, .6f); p.flash = .1f; p.hurtT = .35f; p.press = 1;
@@ -868,21 +1017,23 @@ public partial class Game : MonoBehaviour
         if (skill.id == "badge") { UseBadge(); return; }
         if (skill.id == "dash")
         {
-            skillCd = SkillCdMax; dashT = .34f; dashRam = false; dashSpeed = 9.5f; dashHit.Clear(); tripNext = Random.value < .12f;
-            Say(skill.line, 1f); Dust(); Sfx.Play("후다닥!", .6f);
+            skillCd = SkillCdMax; dashT = .34f; dashRam = Has("umbrella", "dash"); ramStartX = pPos.x; dashSpeed = 9.5f; dashHit.Clear(); tripNext = Random.value < .12f;
+            Say(skill.line, 1f); Dust(); Sfx.Play("후다닥!", .6f); ComboOnSkill(1);
             return;
         }
         skillCd = SkillCdMax;
         Sfx.Play(skill.id == "speaker" ? "trot" : "skill", .55f);
         Say(skill.line, 1.8f);
         float dur = skill.duration * (1 + skLv * .25f);
-                if (skill.id == "perfume") dizzy = 2f;
-        if (skill.id == "phone") noAttack = dur;
+                if (skill.id == "perfume" && !Has("heel", "perfume")) dizzy = 2f;
+        if (skill.id == "phone" && !Has("card", "phone")) noAttack = dur;
+        ComboOnSkill(dur);
         if (skill.id == "coffee")
         {
             var pos = pPos + new Vector2(facing * 2f, 0);
-            var g = Spr("spill", Art.Puddle(), pos, -650); g.transform.localScale = new Vector3(1.05f, .85f, 1);
-            spills.Add(new Spill { go = g, pos = pos, life = dur });
+            float cs = Has("tumbler", "coffee") ? 1.8f : 1;
+            var g = Spr("spill", Art.Puddle(), pos, -650); g.transform.localScale = new Vector3(1.05f * cs, .85f * cs, 1);
+            spills.Add(new Spill { go = g, pos = pos, life = dur, r = cs });
             return;
         }
         AddRing(pPos + new Vector2(0, 1), skill.radius, skill.id == "cough" ? new Color(.8f, .85f, .85f) : new Color(1, .6f, .85f));
@@ -890,7 +1041,8 @@ public partial class Game : MonoBehaviour
         {
             if (p.dying || (p.pos - pPos).magnitude > skill.radius) continue;
             p.stun = Mathf.Max(p.stun, p.isBoss ? dur * .5f : dur);
-            if (skill.id == "speaker") p.angry = dur + 4;
+            if (skill.id == "speaker" && ActiveCombo == null) p.angry = dur + 4;
+            ComboOnHit(p, dur);
             if (Random.value < .5f) Float(skill.id == "speaker" ? "♪" : "멈칫!", p.pos + new Vector2(0, 2.1f), new Color(.6f, .85f, 1f));
         }
     }
@@ -926,11 +1078,17 @@ public partial class Game : MonoBehaviour
 
     int pFacingOf(Passenger p) { return (pRig != null ? pPos.x : targetX / 2) < p.pos.x ? -1 : 1; }
 
+    const float ShoveDamage = .5f;
+
     void Hurt(float amount, Passenger from)
     {
         if (hurtCd > 0 || phase == Phase.Exit || arrived || dashT > 0 || practice) return;
-        hurtCd = 1.4f; mental -= godMode ? 0 : amount * .34f * mTaken; pFlash = .15f; Sfx.Play("ouch", .4f);
-        if (Random.value < .35f) Speak(from, from.def.quips[Random.Range(0, from.def.quips.Length)], 1.2f);
+        float dmg = amount * ShoveDamage * mTaken * (lobby ? .45f : 1) * (ActiveCombo != null ? ComboTaken : 1);
+        hurtCd = .6f; mental -= godMode ? 0 : dmg; pFlash = .18f; Sfx.Hit("thudL", .32f, .2f); Sfx.Play("ouch", .22f);
+        from.shoveT = .3f;
+        pVel += (pPos - from.pos).normalized * (1.1f + Mathf.Min(3, from.def.weight) * .25f);
+        Float("-" + Mathf.Max(1, Mathf.RoundToInt(dmg)), pPos + new Vector2(0, 2.2f), new Color(1, .35f, .3f));
+        if (Random.value < .2f) Speak(from, from.def.quips[Random.Range(0, from.def.quips.Length)], 1.2f);
         if (from.def.latch) latched = .9f;
     }
 
@@ -949,7 +1107,7 @@ public partial class Game : MonoBehaviour
                 if (p.dieT <= 0) { Destroy(p.rig.go); crowd.RemoveAt(i); bubbles.RemoveAll(b => b.who == p); }
                 continue;
             }
-            p.stun -= dt; p.angry -= dt; p.attackT -= dt; p.hurtT -= dt; p.hitLean = Mathf.MoveTowards(p.hitLean, 0, dt * 90); p.phase += dt * 2; p.slow -= dt; p.fall -= dt; p.posing -= dt;
+            p.stun -= dt; p.angry -= dt; p.shoveT -= dt; p.attackT -= dt; p.hurtT -= dt; p.hitLean = Mathf.MoveTowards(p.hitLean, 0, dt * 90); p.phase += dt * 2; p.slow -= dt; p.fall -= dt; p.posing -= dt; p.daze -= dt;
             if (p.flail > 0)
             {
                 p.flail -= dt; p.flailT -= dt; p.stun = Mathf.Max(p.stun, .1f);
@@ -992,8 +1150,9 @@ public partial class Game : MonoBehaviour
                 mv = to.normalized * sp;
                 // 떨어진 인형이 가까우면 그쪽으로 몰린다
                 if (!p.isBoss) foreach (var l in lures) { var tl = l.pos - p.pos; if (tl.magnitude < 3.6f) { mv = tl.normalized * Mathf.Max(sp, .9f); break; } }
+                if (p.daze > 0) mv = -to.normalized * Mathf.Max(sp, 1.3f) + new Vector2(0, Mathf.Sin(Time.time * 3 + p.phase) * .5f);
                 if (p.def.drunk) mv += new Vector2(Mathf.Sin(Time.time * 2 + p.phase), Mathf.Cos(Time.time * 3 + p.phase)) * .9f;
-                if (dist < p.Radius + PlayerR + .18f && p.attackT <= 0) { p.attackT = Random.Range(1.1f, 1.7f); Hurt(p.def.power * (1 + stageIndex * .05f) * HardHit, p); }
+                if (p.daze <= 0 && dist < p.Radius + PlayerR + .18f && p.attackT <= 0) { p.attackT = Random.Range(1.1f, 1.7f); Hurt(p.def.power * (1 + stageIndex * .05f) * HardHit, p); }
             }
             p.vel = Vector2.Lerp(p.vel, Vector2.zero, dt * 5);
             p.pos += (mv + p.vel) * dt;
@@ -1035,14 +1194,14 @@ public partial class Game : MonoBehaviour
             p.press = Mathf.MoveTowards(p.press, 0, dt * 3);
             float q = Mathf.Clamp01(p.press);
             p.rig.root.localScale = new Vector3(p.size * (1 + q * .2f), p.size * (1 - q * .16f), 1);
-            float pLean = p.fall > 0 ? 72 * pFacingOf(p) * p.fallDir : p.hitLean > 0 ? -p.hitLean : (p.stun > 0 ? Mathf.Sin(p.phase * 3) * 5 : 0);
-            float pArm = p.flail > 0 ? Mathf.Sin(p.phase * 22) * 130 : p.posing > 0 ? 170 : p.def.look == "phone" || p.def.look == "makeup" ? 50 : 0;
+            float pLean = p.fall > 0 ? 72 * pFacingOf(p) * p.fallDir : p.hitLean > 0 ? -p.hitLean : p.shoveT > 0 ? 16 : (p.stun > 0 ? Mathf.Sin(p.phase * 3) * 5 : 0);
+            float pArm = p.shoveT > 0 ? 95 : p.flail > 0 ? Mathf.Sin(p.phase * 22) * 130 : p.posing > 0 ? 170 : p.def.look == "phone" || p.def.look == "makeup" ? 50 : 0;
             if (p.flail > 0 && Random.value < .03f) Float("앗따가!", p.pos + new Vector2(0, 2.1f), Color.white);
             p.rig.Pose(p.bowl > 0 ? p.pos + new Vector2(0, .75f) : p.pos, pFacingOf(p), p.anim, p.moving, pLean, pArm, p.phase);
             p.rig.root.rotation = p.bowl > 0 ? Quaternion.Euler(0, 0, -p.bowlDir * p.bowl * 1100) : Quaternion.identity;
             p.rig.SetOrder(Order(p.pos.y));
-            p.rig.SetFace(p.hurtT > 0 ? Art.Face.Hurt : (p.stun > 0 ? Art.Face.Dizzy : Art.Face.Normal));
-            p.rig.SetColor(p.flash > 0 ? new Color(1, .72f, .72f) : (p.slow > 0 ? new Color(.82f, .72f, 1f) : p.stun > 0 && p.posing <= 0 && p.flail <= 0 && p.fall <= 0 ? new Color(.55f, .78f, 1f) : Color.white));
+            p.rig.SetFace(p.hurtT > 0 ? Art.Face.Hurt : (p.stun > 0 || p.daze > 0 ? Art.Face.Dizzy : Art.Face.Normal));
+            p.rig.SetColor(p.flash > 0 ? new Color(1, .72f, .72f) : p.daze > 0 ? new Color(1, .78f, .92f) : (p.slow > 0 ? new Color(.82f, .72f, 1f) : p.stun > 0 && p.posing <= 0 && p.flail <= 0 && p.fall <= 0 ? new Color(.55f, .78f, 1f) : Color.white));
         }
     }
 
@@ -1081,7 +1240,7 @@ public partial class Game : MonoBehaviour
                         if ((pPos - p.pos).magnitude < 2.2f) { pVel.x += Mathf.Sign(pPos.x - p.pos.x) * 3; pFlash = .15f; }
                         break;
                     }
-                    if (s.read) { p.stun = Mathf.Max(p.stun, p.isBoss ? .2f : .7f); if (Random.value < .25f) Speak(p, "이런 사람이셨군요", 1f); }
+                    if (s.read) { p.stun = Mathf.Max(p.stun, p.isBoss ? .2f : comboT > 0 && Has("card", "phone") ? 1.4f : .7f); if (Random.value < .25f) Speak(p, "이런 사람이셨군요", 1f); }
                     if (!s.bomb && s.hit.Count >= 2) { s.life = 0; break; }
                 }
             if (s.life <= 0) { Destroy(s.go); shots.RemoveAt(i); }
@@ -1096,7 +1255,7 @@ public partial class Game : MonoBehaviour
         bool back = w.kind == "back" && !frontpack;
         float armAngle = arrived ? 175 : onCallT > 0 ? 140 : (ringing ? 70 : 25);
         bool shoving = pressLoad > 0;
-        float lean = shoving ? 15 : 0;
+        float lean = pFlash > 0 ? -12 : shoving ? 15 : 0;
         if (atkAnim <= 0 && shoving && !ringing && onCallT <= 0) armAngle = 95;
         int shown = facing;
         wSr.sprite = Art.Icon(w.id); wSr.sortingOrder = Order(pPos.y) + 3008;
@@ -1126,8 +1285,9 @@ public partial class Game : MonoBehaviour
         }
         if (arrow != null)
         {
-            arrow.position = new Vector2(targetX, 2.05f + Mathf.Sin(Time.time * 5) * .1f);
-            arrow.gameObject.SetActive((!lobby || bossDown) && !practice);
+            float ax = platform ? Mathf.Clamp(Mathf.Round(pPos.x / DoorGap), 0, platMax) * DoorGap : targetX;
+            arrow.position = new Vector2(ax, 2.05f + Mathf.Sin(Time.time * 5) * .1f);
+            arrow.gameObject.SetActive(platform ? phase == Phase.Open : (!lobby || bossDown) && !practice);
         }
     }
 
@@ -1156,6 +1316,14 @@ public partial class Game : MonoBehaviour
             else if (phase == Phase.Leave) { float u = 1 - Mathf.Clamp01(phaseT / 1.1f); sx = -48 * u * u; }
             if (passT > 0) sx = Mathf.Lerp(-48, 48, passT / 1.5f);
             stationRoot.position = new Vector3(sx, 0, 0);
+        }
+        if (trainRoot != null)
+        {
+            trainRoot.gameObject.SetActive(phase != Phase.Ride);
+            float tx = 0;
+            if (phase == Phase.Brake) { float u = 1 - Mathf.Clamp01(phaseT / 3f); tx = 60 * (1 - u) * (1 - u); }
+            else if (phase == Phase.Leave) { float u = 1 - Mathf.Clamp01(phaseT / 1.1f); tx = -60 * u * u; }
+            trainRoot.position = new Vector3(tx, 0, 0);
         }
         for (int i = 0; i < doors.Count; i++)
         {
